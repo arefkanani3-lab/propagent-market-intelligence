@@ -1,7 +1,5 @@
-from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, Boolean, Index, UniqueConstraint
-)
-from app.database import Base
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Index, UniqueConstraint
+from database import Base
 
 class Transaction(Base):
     __tablename__ = "transactions"
