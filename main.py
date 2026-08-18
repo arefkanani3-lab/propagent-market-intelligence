@@ -1,24 +1,27 @@
 import io
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from statistics import median, pstdev
 
 import pandas as pd
 from fastapi import FastAPI, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import Base, engine, get_db
-from models import Transaction
+from models import Transaction, IngestionRun
 from schemas import ValuationRequest
 
 SQM_TO_SQFT = 10.7639104167
+BASE_DIR = Path(__file__).resolve().parent
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="PropAgent Market Intelligence Engine",
-    version="0.2.0-flat",
+    version="0.3.0",
     description="DLD ingestion, market analytics, comparable search and explainable valuation."
 )
 
@@ -137,7 +140,7 @@ def read_upload(filename: str, payload: bytes) -> pd.DataFrame:
         return pd.read_excel(io.BytesIO(payload))
     raise ValueError("Only .csv and .xlsx are supported")
 
-def ingest_dataframe(db: Session, df: pd.DataFrame) -> dict:
+def ingest_dataframe(db: Session, df: pd.DataFrame, filename: str) -> dict:
     clean = normalize_dld_dataframe(df)
 
     existing = {
@@ -164,13 +167,25 @@ def ingest_dataframe(db: Session, df: pd.DataFrame) -> dict:
 
     if batch:
         db.bulk_save_objects(batch)
-        db.commit()
+
+    run = IngestionRun(
+        filename=filename,
+        uploaded_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        raw_rows=int(len(df)),
+        valid_rows=int(len(clean)),
+        inserted_rows=len(batch),
+        duplicates_skipped=skipped,
+        status="completed",
+    )
+    db.add(run)
+    db.commit()
 
     return {
         "raw_rows": int(len(df)),
         "valid_rows": int(len(clean)),
         "inserted": len(batch),
         "duplicates_skipped": skipped,
+        "status": "completed",
     }
 
 def py_median(values):
@@ -357,16 +372,64 @@ def value_property(db: Session, req: ValuationRequest) -> dict:
         "comparables": comps,
     }
 
+@app.get("/", include_in_schema=False)
+def dashboard_ui():
+    return FileResponse(BASE_DIR / "index.html")
+
+@app.get("/styles.css", include_in_schema=False)
+def dashboard_css():
+    return FileResponse(BASE_DIR / "styles.css", media_type="text/css")
+
+@app.get("/app.js", include_in_schema=False)
+def dashboard_js():
+    return FileResponse(BASE_DIR / "app.js", media_type="application/javascript")
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "engine": "PropAgent Market Intelligence Engine V0.2"}
+    return {"status": "ok", "engine": "PropAgent Market Intelligence Engine V0.3"}
+
+@app.get("/dashboard/summary")
+def dashboard_summary(db: Session = Depends(get_db)):
+    total = db.query(func.count(Transaction.id)).scalar() or 0
+    areas = db.query(func.count(func.distinct(Transaction.area_en))).scalar() or 0
+    projects = db.query(func.count(func.distinct(Transaction.project_en))).filter(
+        Transaction.project_en.isnot(None)
+    ).scalar() or 0
+    avg_price = db.query(func.avg(Transaction.transaction_value)).scalar()
+    avg_ppsf = db.query(func.avg(Transaction.price_per_sqft)).scalar()
+    latest_tx = db.query(func.max(Transaction.instance_date)).scalar()
+    latest_ingestion = db.query(func.max(IngestionRun.uploaded_at)).scalar()
+
+    return {
+        "total_transactions": int(total),
+        "areas_covered": int(areas),
+        "projects_covered": int(projects),
+        "average_price": round(float(avg_price), 2) if avg_price else None,
+        "average_ppsf": round(float(avg_ppsf), 2) if avg_ppsf else None,
+        "latest_transaction_date": latest_tx.isoformat() if latest_tx else None,
+        "last_ingestion_date": latest_ingestion.isoformat() if latest_ingestion else None,
+    }
+
+@app.get("/meta/options")
+def meta_options(db: Session = Depends(get_db)):
+    areas = sorted([x[0] for x in db.query(Transaction.area_en).distinct().all() if x[0]])
+    projects = sorted([x[0] for x in db.query(Transaction.project_en).distinct().all() if x[0]])
+    subtypes = sorted([x[0] for x in db.query(Transaction.property_subtype_en).distinct().all() if x[0]])
+    rooms = sorted([x[0] for x in db.query(Transaction.rooms).distinct().all() if x[0] is not None])
+    return {
+        "areas": areas,
+        "projects": projects,
+        "property_subtypes": subtypes,
+        "bedrooms": rooms,
+    }
 
 @app.post("/ingest/dld")
 async def ingest_dld(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
         payload = await file.read()
-        df = read_upload(file.filename or "upload.csv", payload)
-        return ingest_dataframe(db, df)
+        filename = file.filename or "upload.csv"
+        df = read_upload(filename, payload)
+        return ingest_dataframe(db, df, filename)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

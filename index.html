@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>PropAgent Market Intelligence</title>
+  <link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">P</div><div><b>PropAgent</b><span>Market Intelligence</span></div></div>
+    <nav>
+      <button class="nav active" data-page="dashboard">Dashboard</button>
+      <button class="nav" data-page="upload">Upload Data</button>
+      <button class="nav" data-page="analytics">Market Analytics</button>
+      <button class="nav" data-page="valuation">Valuation</button>
+      <a class="nav" href="/docs" target="_blank">API Docs ↗</a>
+    </nav>
+    <div class="side-status"><i></i><div><b>Production</b><span id="apiState">Checking API...</span></div></div>
+  </aside>
+
+  <main>
+    <header class="top">
+      <div><h1 id="title">Dashboard</h1><p id="subtitle">Market overview from your DLD transaction database.</p></div>
+      <div class="badges"><span class="badge">Production</span><span class="badge ok" id="healthBadge">● API Healthy</span></div>
+    </header>
+
+    <section id="dashboard" class="page active">
+      <div class="cards five">
+        <article><span>Total Transactions</span><strong id="mTx">—</strong><small>Stored in PostgreSQL</small></article>
+        <article><span>Areas Covered</span><strong id="mAreas">—</strong><small>Dubai areas</small></article>
+        <article><span>Projects Covered</span><strong id="mProjects">—</strong><small>Named projects</small></article>
+        <article><span>Average Price</span><strong id="mPrice">—</strong><small>All stored transactions</small></article>
+        <article><span>Average PPSF</span><strong id="mPpsf">—</strong><small>Price per sq ft</small></article>
+      </div>
+
+      <div class="split">
+        <article class="panel">
+          <div class="panel-head"><div><h2>Top Areas</h2><p>Transaction volume · last 365 days</p></div><button class="ghost" data-go="analytics">View analytics</button></div>
+          <div id="bars" class="bars"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h2>System Snapshot</h2><p>Current engine status</p></div></div>
+          <div class="snapshot">
+            <div><span>API</span><b class="green">Healthy</b></div>
+            <div><span>Database</span><b class="green">Connected</b></div>
+            <div><span>Latest transaction</span><b id="latestTx">—</b></div>
+            <div><span>Last ingestion</span><b id="lastIngest">—</b></div>
+            <div><span>Engine</span><b>V0.3</b></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="actions">
+        <button class="primary" data-go="upload">Upload DLD Transactions</button>
+        <button class="ghost" data-go="analytics">Open Market Analytics</button>
+        <button class="ghost" data-go="valuation">Estimate Property Value</button>
+      </div>
+    </section>
+
+    <section id="upload" class="page">
+      <article class="panel narrow">
+        <div class="panel-head"><div><h2>Upload DLD Transactions</h2><p>Import CSV or Excel files into PostgreSQL.</p></div></div>
+        <label class="drop" id="drop"><input id="file" type="file" accept=".csv,.xlsx" hidden/><b>Drop your DLD file here</b><span>or click to browse · CSV / XLSX</span></label>
+        <div id="fileInfo" class="file-info hidden"></div>
+        <button id="ingest" class="primary full" disabled>Ingest Data</button>
+        <div id="ingestResult" class="notice hidden"></div>
+      </article>
+    </section>
+
+    <section id="analytics" class="page">
+      <article class="panel">
+        <div class="panel-head analytics-head">
+          <div><h2>Area Market Analytics</h2><p>Compare transaction volume, pricing and PPSF.</p></div>
+          <div class="inline"><label>Lookback days<input id="days" type="number" value="365" min="30" max="3650"/></label><button id="refresh" class="primary">Refresh</button></div>
+        </div>
+        <div class="cards four compact">
+          <article><span>Total Transactions</span><strong id="aTx">—</strong></article>
+          <article><span>Active Areas</span><strong id="aAreas">—</strong></article>
+          <article><span>Weighted Avg Price</span><strong id="aPrice">—</strong></article>
+          <article><span>Weighted Avg PPSF</span><strong id="aPpsf">—</strong></article>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>Area</th><th>Transactions</th><th>Average Price</th><th>Median Price</th><th>Average PPSF</th><th>Median PPSF</th><th>Min</th><th>Max</th></tr></thead><tbody id="analyticsBody"></tbody></table>
+        </div>
+      </article>
+    </section>
+
+    <section id="valuation" class="page">
+      <div class="valuation-grid">
+        <article class="panel">
+          <div class="panel-head"><div><h2>Estimate Property Value</h2><p>Comparable-based V0 estimate using DLD transactions.</p></div></div>
+          <form id="valuationForm" class="form">
+            <label>Area<select id="vArea" required></select></label>
+            <label>Project <em>optional</em><input id="vProject" list="projects" placeholder="Project name"/><datalist id="projects"></datalist></label>
+            <label>Property subtype<select id="vSubtype"></select></label>
+            <label>Bedrooms<select id="vBeds"></select></label>
+            <label>Size (sqm)<input id="vSize" type="number" value="160" step=".01" min="1"/></label>
+            <label>Asking price AED<input id="vAsk" type="number" value="3000000" min="1"/></label>
+            <label>Lookback days<input id="vDays" type="number" value="365" min="30" max="3650"/></label>
+            <label>Max size difference<input id="vDiff" type="number" value=".35" min=".05" max="1" step=".05"/></label>
+            <button class="primary full submit" type="submit">Estimate Value</button>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div id="emptyVal" class="empty"><div>◇</div><b>No valuation yet</b><span>Enter property details and run the engine.</span></div>
+          <div id="valResult" class="hidden">
+            <div class="hero"><span>Estimated Market Value</span><strong id="rValue">—</strong><small id="rRange">—</small></div>
+            <div class="cards four mini">
+              <article><span>Estimated PPSF</span><strong id="rPpsf">—</strong></article>
+              <article><span>Vs Asking</span><strong id="rAsk">—</strong></article>
+              <article><span>Comparables</span><strong id="rComps">—</strong></article>
+              <article><span>Eligible</span><strong id="rEligible">—</strong></article>
+            </div>
+            <div class="confidence"><div><span>Confidence</span><b id="rConf">—</b></div><div class="track"><i id="confBar"></i></div></div>
+            <div id="insight" class="insight"></div>
+          </div>
+        </article>
+      </div>
+
+      <article id="compPanel" class="panel hidden comps-panel">
+        <div class="panel-head"><div><h2>Comparable Transactions</h2><p>Selected by the current similarity logic.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Date</th><th>Project</th><th>Beds</th><th>Size sqm</th><th>Sale Price</th><th>PPSF</th><th>Size Diff</th><th>Recency</th><th>Similarity</th></tr></thead><tbody id="compsBody"></tbody></table></div>
+        <p class="method" id="method"></p>
+      </article>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>

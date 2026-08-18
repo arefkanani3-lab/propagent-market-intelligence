@@ -49,3 +49,16 @@ class Transaction(Base):
             "rooms", "instance_date"
         ),
     )
+
+
+class IngestionRun(Base):
+    __tablename__ = "ingestion_runs"
+
+    id = Column(Integer, primary_key=True)
+    filename = Column(String(255), nullable=False)
+    uploaded_at = Column(DateTime, nullable=False)
+    raw_rows = Column(Integer, nullable=False, default=0)
+    valid_rows = Column(Integer, nullable=False, default=0)
+    inserted_rows = Column(Integer, nullable=False, default=0)
+    duplicates_skipped = Column(Integer, nullable=False, default=0)
+    status = Column(String(50), nullable=False, default="completed")

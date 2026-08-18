@@ -1,23 +1,26 @@
-# PropAgent Market Intelligence Engine — Railway Flat
+# PropAgent Market Intelligence Engine — V0.3 UI
 
-Flat-layout version for GitHub web upload.
+This is the same Railway + PostgreSQL project with a business-facing UI added to the existing FastAPI service.
 
-Repository root:
-- main.py
-- config.py
-- database.py
-- models.py
-- schemas.py
-- Dockerfile
-- requirements.txt
-- railway.json
+Main dashboard: `/`
+Developer API docs: `/docs`
 
-No `app/` folder is required.
+New supporting API endpoints:
+- `GET /dashboard/summary`
+- `GET /meta/options`
 
-## API
-- GET `/health`
-- POST `/ingest/dld`
-- GET `/analytics/areas`
-- POST `/valuation`
+Existing endpoints remain:
+- `GET /health`
+- `POST /ingest/dld`
+- `GET /analytics/areas`
+- `POST /valuation`
 
-Deploy to Railway, attach PostgreSQL, set `DATABASE_URL`, then generate a public domain.
+To update the current GitHub/Railway project, upload/replace:
+- `main.py`
+- `models.py`
+- `index.html`
+- `styles.css`
+- `app.js`
+- `README.md`
+
+No new Railway project, database, domain, or DATABASE_URL is required.
