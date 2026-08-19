@@ -1,4 +1,5 @@
 import io
+import math
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -22,7 +23,7 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="PropAgent Market Intelligence Engine",
-    version="0.3.0",
+    version="0.3.2",
     description="DLD ingestion, market analytics, comparable search and explainable valuation."
 )
 
@@ -95,12 +96,18 @@ def normalize_dld_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if "actual_area_sqm" in out:
         out["actual_area_sqm"] = pd.to_numeric(out["actual_area_sqm"], errors="coerce")
 
+    # Keep integer-like columns nullable. Do not let pandas turn missing integers
+    # into float NaN values that PostgreSQL INTEGER columns cannot accept.
     for col in ["total_buyer", "total_seller"]:
         if col in out:
-            out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0).astype(int)
+            out[col] = pd.to_numeric(out[col], errors="coerce").astype("Int64")
 
     if "rooms" in out:
-        out["rooms"] = out["rooms"].apply(parse_rooms)
+        out["rooms"] = pd.Series(
+            [parse_rooms(value) for value in out["rooms"]],
+            index=out.index,
+            dtype="Int64",
+        )
 
     for col in [
         "transaction_number", "group_en", "procedure_en", "usage_en",
@@ -142,16 +149,24 @@ def read_upload(filename: str, payload: bytes) -> pd.DataFrame:
     raise ValueError("Only .csv and .xlsx are supported")
 
 def sanitize_record(record: dict) -> dict:
-    """Convert pandas/numpy missing values and scalars to DB-safe Python values."""
+    """Convert pandas/numpy values into PostgreSQL-safe native Python values."""
     cleaned = {}
 
     for key, value in record.items():
-        try:
-            is_missing = bool(pd.isna(value))
-        except (TypeError, ValueError):
-            is_missing = False
+        if hasattr(value, "item") and not isinstance(value, (str, bytes)):
+            try:
+                value = value.item()
+            except (ValueError, AttributeError):
+                pass
 
-        if is_missing:
+        try:
+            if value is None or bool(pd.isna(value)):
+                cleaned[key] = None
+                continue
+        except (TypeError, ValueError):
+            pass
+
+        if isinstance(value, float) and not math.isfinite(value):
             cleaned[key] = None
             continue
 
@@ -159,40 +174,64 @@ def sanitize_record(record: dict) -> dict:
             cleaned[key] = value.to_pydatetime()
             continue
 
-        # Convert numpy scalar types to normal Python values.
-        if hasattr(value, "item") and not isinstance(value, (str, bytes)):
-            try:
-                value = value.item()
-            except (ValueError, AttributeError):
-                pass
-
         cleaned[key] = value
 
-    # PostgreSQL INTEGER columns must receive actual integers or NULL, never NaN.
     for key in ("rooms", "total_buyer", "total_seller"):
         value = cleaned.get(key)
-        if value is not None:
-            cleaned[key] = int(value)
+
+        if value is None:
+            cleaned[key] = None
+            continue
+
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            cleaned[key] = None
+            continue
+
+        if not math.isfinite(numeric):
+            cleaned[key] = None
+        else:
+            cleaned[key] = int(numeric)
+
+    for key, value in list(cleaned.items()):
+        if isinstance(value, float) and not math.isfinite(value):
+            cleaned[key] = None
 
     return cleaned
-
 
 def ingest_dataframe(db: Session, df: pd.DataFrame, filename: str) -> dict:
     clean = normalize_dld_dataframe(df)
 
     existing = {
         (x.transaction_number, x.instance_date)
-        for x in db.query(Transaction.transaction_number, Transaction.instance_date).all()
+        for x in db.query(
+            Transaction.transaction_number,
+            Transaction.instance_date,
+        ).all()
     }
 
     batch = []
     skipped = 0
 
-    for raw_record in clean.to_dict(orient="records"):
+    for row_number, raw_record in enumerate(
+        clean.to_dict(orient="records"),
+        start=1,
+    ):
         record = sanitize_record(raw_record)
-        dt = record["instance_date"]
 
+        # Hard guard against NaN/invalid values reaching PostgreSQL INTEGER columns.
+        for integer_field in ("rooms", "total_buyer", "total_seller"):
+            value = record.get(integer_field)
+            if value is not None and not isinstance(value, int):
+                raise ValueError(
+                    f"Row {row_number}: {integer_field} is not a valid integer/NULL "
+                    f"after sanitization: {value!r}"
+                )
+
+        dt = record["instance_date"]
         key = (record["transaction_number"], dt)
+
         if key in existing:
             skipped += 1
             continue
@@ -202,7 +241,7 @@ def ingest_dataframe(db: Session, df: pd.DataFrame, filename: str) -> dict:
 
     try:
         if batch:
-            db.bulk_save_objects(batch)
+            db.add_all(batch)
 
         run = IngestionRun(
             filename=filename,
@@ -215,6 +254,7 @@ def ingest_dataframe(db: Session, df: pd.DataFrame, filename: str) -> dict:
         )
         db.add(run)
         db.commit()
+
     except Exception:
         db.rollback()
         raise
@@ -425,7 +465,7 @@ def dashboard_js():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "engine": "PropAgent Market Intelligence Engine V0.3"}
+    return {"status": "ok", "engine": "PropAgent Market Intelligence Engine V0.3.2"}
 
 @app.get("/dashboard/summary")
 def dashboard_summary(db: Session = Depends(get_db)):
